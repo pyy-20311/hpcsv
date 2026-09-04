@@ -1,8 +1,7 @@
 # hpcsv
-
+## 适用于频繁读取大规模csv数据，例如雷达信号处理算法测试等场景
 > 高性能数值 CSV 读取器（单头文件 `csv_reader.hpp`）· 零依赖 · C++17
 > High-performance numeric CSV reader for float/double data — header-only, zero dependency.
-
 `hpcsv` 是一个面向**数值型 CSV**（如 `double,double,double...`）的跨平台读取器：
 mmap 零拷贝 + 进程级共享线程池并行解析，一个统一接口同时覆盖 float / double、
 单线程 / 多线程、任意分隔符、表头、内存对齐（FFTW）等场景。整个库只有一个
