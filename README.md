@@ -1,6 +1,6 @@
 # hpcsv
 
-[English](README.md) | [简体中文](README_zh.md)(aa.md)
+[English](README.md) | [简体中文](README_zh.md)(README_zh.md)
 
 ## Fast reading of large-scale (GB-level) CSV data — e.g. test scenarios for radar signal processing algorithms.
 
