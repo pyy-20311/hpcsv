@@ -1,181 +1,187 @@
 # hpcsv
-## 适用于快速读取大规模csv数据(GB级)，例如雷达信号处理算法测试等场景 
-## Suitable for fast reading of large‑scale GB‑level CSV data, such as test scenarios for radar signal processing algorithms.
-> 高性能数值 CSV 读取器（单头文件 `csv_reader.hpp`）· 零依赖 · C++17
-> High-performance numeric CSV reader for float/double data — header-only, zero dependency.
-`hpcsv` 是一个面向**数值型 CSV**（如 `double,double,double...`）的跨平台读取器：
-mmap 零拷贝 + 进程级共享线程池并行解析，一个统一接口同时覆盖 float / double、
-单线程 / 多线程、任意分隔符、表头、内存对齐（FFTW）等场景。整个库只有一个
-头文件 `csv_reader.hpp`，复制即可引入。
 
-本库**不解析字符串 / 带引号字段**（RFC 4180 引号模式不支持），专注把纯数值 CSV
-以最高吞吐读成**行优先的连续内存数组**——可直接以裸指针交给 FFTW / BLAS / SIMD
-等 C 接口使用（见下文「以指针形式使用数据」）。
+[English](README.md) | [简体中文](README_zh.md)
 
----
+## Fast reading of large-scale (GB-level) CSV data — e.g. test scenarios for radar signal processing algorithms.
 
-## 特性 / Features
+> High-performance numeric CSV reader for float/double data — header-only (`csv_reader.hpp`), zero dependency, C++17.
 
-- 📄 **单头文件，零依赖**：仅需 `#include "csv_reader.hpp"`，无需链接第三方库（仅 `-pthread`）
-- ⚡ **mmap 零拷贝**：文件直接映射，解析全程不复制文件内容（Linux / macOS / Windows）
-- 🧵 **多线程并行**（默认开启）：按行对齐分片 → 线程池并行解析；可一键关闭走单线程内联路径
-- 🏊 **进程级共享线程池**：N 个 `CsvReader` 实例全程只创建**一次**线程池（首次并行读取时惰性创建）
-- 🔢 **float / double 统一接口**：模板参数 `T` 选类型，解析逻辑零重复
-- 🧮 **完整数值语义**：科学计数法、`nan`/`inf`/`infinity`（大小写不敏感）、超长整数、
-  超长指数防溢出、上溢→±inf、下溢→0
-- 🧭 **格式健壮**：UTF-8 BOM 自动剥离、CRLF / LF、无结尾换行、空行跳过、
-  空字段/非法字段→NaN、短行 NaN 补齐、超宽行截断
-- 📐 **可选内存对齐**：`CsvReader<T, Align>`（fftw 等 SIMD 需求）
+`hpcsv` is a cross-platform reader for **numeric CSV** files (e.g. `double,double,double...`):
+mmap zero-copy plus a process-wide shared thread pool for parallel parsing. One unified
+interface covers float / double, single- / multi-threading, any delimiter, header rows,
+and memory alignment (FFTW). The whole library is a single header, `csv_reader.hpp` —
+drop it into your project and `#include` it.
 
-## 需求 / Requirements
-
-- C++17 编译器（GCC ≥ 7 / Clang ≥ 5 / MSVC 2017 15.7+）
-- 多线程路径需要链接 pthread（Linux/macOS）：`-pthread`
-- Windows 代码路径（CreateFileMapping + UTF-8 路径回退 ANSI）已实现，
-  当前在 Linux（GCC 8.5 / Clang）上持续验证
+Strings and quoted fields (RFC 4180) are **not** supported. The library focuses on
+reading pure numeric CSV into **row-major contiguous memory** at maximum throughput,
+ready to be handed to C interfaces such as FFTW / BLAS / SIMD as raw pointers
+(see [Using the data as raw pointers](#using-the-data-as-raw-pointers)).
 
 ---
 
-## 快速开始 / Quick Start
+## Features
+
+- 📄 **Header-only, zero dependency** — just `#include "csv_reader.hpp"`; nothing else to link except `-pthread`
+- ⚡ **mmap zero-copy** — the file is mapped directly; file content is never copied during parsing (Linux / macOS / Windows)
+- 🧵 **Multithreaded by default** — line-aligned chunking → parallel parsing on a thread pool; disable with one flag to fall back to a single-threaded inline path
+- 🏊 **Process-wide shared thread pool** — N `CsvReader` instances create only **one** pool in total (created lazily on the first parallel read)
+- 🔢 **Unified float / double interface** — pick the type with template parameter `T`; parsing logic is shared, zero duplication
+- 🧮 **Full numeric semantics** — scientific notation, `nan` / `inf` / `infinity` (case-insensitive), >18-digit integers, exponent-overflow protection, overflow → ±inf, underflow → 0
+- 🧭 **Format robustness** — UTF-8 BOM auto-stripped, CRLF / LF, missing trailing newline, blank lines skipped, empty / invalid fields → NaN, short rows padded with NaN, over-wide rows truncated
+- 📐 **Optional memory alignment** — `CsvReader<T, Align>` (FFTW / SIMD needs)
+
+## Requirements
+
+- C++17 compiler (GCC ≥ 7 / Clang ≥ 5 / MSVC 2017 15.7+)
+- Link `pthread` on Linux/macOS: `-pthread`
+- The Windows code path (CreateFileMapping + UTF-8 paths with ANSI fallback) is implemented; currently continuously verified on Linux (GCC 8.5 / Clang)
+
+---
+
+## Quick Start
 
 ```cpp
 #include "csv_reader.hpp"
 
-// 1. 批量读取（默认多线程开启）
+// 1. Batch read (multithreading on by default)
 CsvReader<double> reader("data.csv");
 auto res = reader.read();        // res.data / res.rows / res.cols / res.at(r, c)
 std::printf("rows=%zu cols=%zu first=%g\n", res.rows, res.cols, res.at(0, 0));
 
-// 2. 关闭多线程（小文件 / 需确定性单线程）
+// 2. Disable multithreading (small files / deterministic single thread)
 CsvReader<float> reader2("data.csv", CsvOptions{false /* parallel */});
 
-// 3. 表头 + 制表符 + 指定分片数
+// 3. Header row + tab delimiter + explicit chunk count
 CsvOptions opt;
 opt.has_header = true;
 opt.delimiter  = '\t';
-opt.threads    = 4;              // 0 = 自动（全局共享池线程数）
+opt.threads    = 4;              // 0 = auto (shared pool size)
 CsvReader<double> reader3("data.tsv", opt);
 
-// 4. 流式读取（低内存，逐行回调）
+// 4. Streaming read (low memory, per-row callback)
 CsvReader<double> reader4("data.csv");
 reader4.stream(2, [](const double* row, size_t ncols, size_t /*tid*/) {
-    // 处理这一行；返回前拷贝需要保留的数据
+    // consume the row; copy anything you need to keep
 });
 
-// 5. 64 字节对齐（fftw 等需求）
+// 5. 64-byte alignment (FFTW etc.)
 CsvReader<double, 64> reader5("data.csv");
-auto aligned = reader5.read();   // aligned.data.data() 满足 64 字节对齐
+auto aligned = reader5.read();   // aligned.data.data() is 64-byte aligned
 ```
 
-编译：
+Build:
 
 ```bash
 g++ -std=c++17 -O2 -pthread -o demo demo.cpp
 ```
 
-> C++20 起可直接用指定初始化：`CsvReader<double> r("f.csv", CsvOptions{.parallel = false});`
+> With C++20 you can use designated initializers:
+> `CsvReader<double> r("f.csv", CsvOptions{.parallel = false});`
 
 ---
 
-## API 一览 / API Overview
+## API Overview
 
 ### `struct CsvOptions`
 
-| 成员 | 默认 | 说明 |
+| Member | Default | Description |
 |---|---|---|
-| `bool parallel` | `true` | 多线程并行读取（默认开启） |
-| `bool has_header` | `false` | 首行为表头，数据从第二行开始 |
-| `char delimiter` | `','` | 字段分隔符（单字符，支持 `\t` `;` 空格等） |
-| `size_t threads` | `0` | 并行分片数；`0` = 全局共享池线程数（仅 `parallel=true` 时生效） |
+| `bool parallel` | `true` | Parallel reading (on by default) |
+| `bool has_header` | `false` | First row is a header; data starts on the second row |
+| `char delimiter` | `','` | Field delimiter (a single char; `\t`, `;`, space, ...) |
+| `size_t threads` | `0` | Parallel chunk count; `0` = shared pool size (only when `parallel=true`) |
 
 ### `template <typename T, size_t Align = 0> class CsvReader`
 
-- `T`：数值类型，需有 `NumericTraits<T>` 特化（内置 `float` / `double`）
-- `Align`：结果数据对齐字节数；`0` = 标准分配，`>0` = N 字节对齐（2 的幂）
+- `T`: the numeric type; requires a `NumericTraits<T>` specialization (built in: `float`, `double`)
+- `Align`: alignment in bytes of the result buffer; `0` = standard allocation, `>0` = N-byte alignment (power of two)
 
-| 方法 | 说明 |
+| Method | Description |
 |---|---|
-| `CsvReader(const char* path, const CsvOptions& = {})` | 打开文件（失败抛 `std::runtime_error`），自动剥离 UTF-8 BOM |
-| `ReadResult read(size_t ncols = 0)` | 批量读入内存；`ncols=0` 时按首行数据自动检测列数 |
-| `void read_into(ReadResult&, size_t ncols = 0)` | 读入调用方持有的结果对象（容量跨调用复用） |
-| `size_t stream(size_t ncols, const RowCallback&)` | 流式读取，回调 `(const T*, ncols, tid)`，返回行数 |
-| `size_t detect_cols()` | 自动检测列数（首个数据行分隔符数 + 1） |
-| `size_t chunk_count()` | 当前实例的并行分片数（`parallel=false` 时恒为 1） |
+| `CsvReader(const char* path, const CsvOptions& = {})` | Opens the file (throws `std::runtime_error` on failure); strips the UTF-8 BOM |
+| `ReadResult read(size_t ncols = 0)` | Reads everything into memory; `ncols = 0` auto-detects from the first data row |
+| `void read_into(ReadResult&, size_t ncols = 0)` | Reads into a caller-owned result (capacity is reused across calls) |
+| `size_t stream(size_t ncols, const RowCallback&)` | Streaming read; callback `(const T*, ncols, tid)`; returns the row count |
+| `size_t detect_cols()` | Auto-detects the column count (delimiters in the first data row + 1) |
+| `size_t chunk_count()` | Parallel chunk count of this instance (always 1 when `parallel=false`) |
 
-`ReadResult`：`data`（行优先扁平数组，`std::vector<T>` 或对齐版本）、`rows`、`cols`、
-`at(r, c)` 二维访问。
+`ReadResult`: `data` (a row-major flat array — `std::vector<T>` or the aligned variant), `rows`, `cols`, and `at(r, c)` for 2-D access.
 
-### 全局线程池调节
+### Tuning the shared thread pool
 
 ```cpp
-ThreadPool::set_shared_workers(8);          // 须在第一次并行读取之前调用
-// 之后：ThreadPool::shared() / shared_workers() / worker_count()
+ThreadPool::set_shared_workers(8);          // call before the first parallel read
+// afterwards: ThreadPool::shared() / shared_workers() / worker_count()
 ```
 
-所有实例共用进程级单例池，首次并行读取时惰性创建；线程数默认 = 硬件并发数。
+All instances share one process-wide singleton pool, created lazily on the first parallel read; the worker count defaults to hardware concurrency.
 
-### 字段级解析（可选公共 API）
+### Field-level parsing (optional public API)
 
 ```cpp
 const char* p = text.data();
-double v = parse_number<double>(p, p + text.size());   // 单字段
-size_t n = parse_number_row<double>(row, row_end, out, max_cols, ',');  // 单行
+double v = parse_number<double>(p, p + text.size());                    // one field
+size_t n = parse_number_row<double>(row, row_end, out, max_cols, ',');  // one row
 ```
 
-### 解析语义 / Parsing semantics
+### Parsing semantics
 
-| 输入 | 结果 |
+| Input | Result |
 |---|---|
-| `123` `-1.5` `+2` `.5` `1e10` `-2.5e-3` | 对应数值 |
-| `nan` `NaN` `inf` `Infinity` `-inf` `-infinity` | ±NaN / ±inf（大小写不敏感） |
-| 空字段、`abc`、`-`、`.`、`e5` 等无有效数字 | `NaN` |
-| `1abc` `1.2.3` `1 5`（部分可解析） | 解析到首个非法字符（strtod 风格），返回 `1.0`/`1.2`/`1.0` |
-| 指数上溢（如 `1e999`） | ±inf |
-| 指数下溢（如 `1e-999`） | `0.0`（float 在 <1e-38 量级即归零） |
-| 超过 18 位的整数 | 浮点累加保数量级，相对误差 ≤ 浮点精度 |
+| `123` `-1.5` `+2` `.5` `1e10` `-2.5e-3` | the numeric value |
+| `nan` `NaN` `inf` `Infinity` `-inf` `-infinity` | ±NaN / ±inf (case-insensitive) |
+| empty field, `abc`, `-`, `.`, `e5`, ... (no significant digits) | `NaN` |
+| `1abc` `1.2.3` `1 5` (partially parseable) | parses up to the first invalid char (strtod style): `1.0` / `1.2` / `1.0` |
+| exponent overflow (e.g. `1e999`) | ±inf |
+| exponent underflow (e.g. `1e-999`) | `0.0` (float is zeroed below ~1e-38) |
+| integers with more than 18 digits | accumulated in floating point, magnitude preserved, relative error ≤ float/double precision |
 
-> 引号 `"..."` 不被特殊处理：会按普通字符参与解析（如 `"1.5"` 得到 `1.5`，`"abc"` 得到 NaN）。
+> Quotes (`"..."`) are not special: they participate in parsing as ordinary characters
+> (`"1.5"` → `1.5`, `"abc"` → NaN).
 
 ---
 
-## 以指针形式使用数据 / Use the data as raw pointers
+## Using the data as raw pointers
 
-`read()` 的结果是**行优先的连续堆内存**（解析时已从 mmap 映射区拷入普通 vector，
-与 reader / 文件的生命周期无关），因此可以零拷贝地以裸指针交给任意 C / C++ API
-（FFTW、BLAS/LAPACK、SIMD、绘图库等）：
+`read()` returns **row-major contiguous heap memory** — parsed values are copied out of
+the mmap region into an ordinary vector, independent of the reader/file lifetime — so you
+can hand raw pointers to any C / C++ API (FFTW, BLAS/LAPACK, SIMD, plotting libraries, ...)
+with zero copying:
 
 ```cpp
 CsvReader<double, 64> reader("data.csv", CsvOptions{false});
-auto res = reader.read();                // 结果对象要活得比指针久
+auto res = reader.read();                // keep the result alive as long as the pointers
 
-double* p = res.data.data();             // 连续缓冲首地址（此处 64 字节对齐）
-size_t  n = res.data.size();             // 元素总数 = rows * cols
+double* p = res.data.data();             // first element of the contiguous buffer (64-byte aligned here)
+size_t  n = res.data.size();             // total element count = rows * cols
 
-process(p, n);                           // 普通 C 接口
-analyze(static_cast<const double*>(p), n);  // 只读接口传 const 指针
+process(p, n);                           // plain C interface
+analyze(static_cast<const double*>(p), n);  // pass const double* to read-only APIs
 ```
 
-行优先索引：元素 `(r, c)` 位于 `p[r * cols + c]`（等价于 `res.at(r, c)`），
-行间距 = `cols` 个 double，列间距 = 1。
+Row-major indexing: element `(r, c)` lives at `p[r * cols + c]` (same as `res.at(r, c)`);
+the row stride is `cols` doubles, the column stride is 1.
 
-**指针生命周期规则：**
+**Pointer lifetime rules:**
 
-- `read()` 的数据已属于 `res.data`（独立堆内存）——`reader` 销毁后指针仍有效；
-  只要 `res` 存活，指针可安全跨线程使用（读取结束后数据不再被修改）
-- `stream()` 回调里的行指针指向 reader 内部的复用缓冲，**仅在回调内有效**，
-  需要保留时请在回调内自行拷贝
-- 若用 `std::move(res.data)` 转移所有权，务必保持新 vector 存活
+- `read()` data belongs to `res.data` (independent heap memory) — pointers stay valid
+  after the `reader` is destroyed; as long as `res` is alive the pointers may be used
+  safely from other threads (data is never modified once the read finishes)
+- Row pointers passed to a `stream()` callback point into the reader's reused buffers
+  and are **valid only inside the callback** — copy anything you need to keep
+- If you `std::move(res.data)` to take ownership, keep the new vector alive
 
-### 接 FFTW（实测示例）
+### FFTW integration (tested example)
 
-`CsvReader<double, 64>` 的 `data()` 指针满足 FFTW 的 SIMD 对齐要求（16/32/64 字节），
-可直接作为变换输入/输出，无需 `fftw_malloc`：
+`CsvReader<double, 64>::data()` satisfies FFTW's SIMD alignment requirements
+(16/32/64 bytes), so it can be used directly as transform input/output — no
+`fftw_malloc` needed:
 
 ```cpp
 #include "csv_reader.hpp"
 #include <fftw3.h>
 
-// 单列 N 点信号 → 实→复 FFT
+// single column of N samples → real-to-complex FFT
 CsvReader<double, 64> reader("signal.csv", CsvOptions{false});
 auto res = reader.read();
 size_t n = res.rows;
@@ -183,10 +189,10 @@ size_t n = res.rows;
 fftw_complex* out = fftw_alloc_complex(n / 2 + 1);
 fftw_plan p = fftw_plan_dft_r2c_1d((int)n, res.data.data(), out, FFTW_ESTIMATE);
 fftw_execute(p);
-// ... 用 out[0..n/2]；记得 fftw_destroy_plan(p); fftw_free(out);
+// ... use out[0..n/2]; remember fftw_destroy_plan(p); fftw_free(out);
 ```
 
-编译链接（FFTW 安装在前缀 `~/projects/fftw` 时）：
+Build & link (when FFTW is installed under the prefix `~/projects/fftw`):
 
 ```bash
 g++ -std=c++17 -O2 -pthread \
@@ -197,36 +203,39 @@ LD_LIBRARY_PATH="$HOME/projects/fftw/lib" ./demo
 
 ---
 
-## 设计 / Design
+## Design
 
 ```
-csv_reader.hpp（单头文件，按依赖顺序）
-├── MappedFile          跨平台内存映射（mmap / CreateFileMapping）
-├── AlignedAllocator    对齐分配器（Align > 0 时使用）
-├── ThreadPool          进程级共享线程池（Meyers 单例，惰性创建）
-│     └─ 所有 CsvReader 实例共用，N 实例 = 1 池
-├── NumericTraits<T>    策略（Strategy）：幂表 / 指数上限 / NaN / Inf
-├── parse_number<T>     统一解析模板（full 科学计数法 / fast 无指数 自动分流）
-└── CsvReader<T, Align> 统一读取器：分片 → 并行解析 → 汇总
+csv_reader.hpp (single header, in dependency order)
+├── MappedFile          cross-platform memory mapping (mmap / CreateFileMapping)
+├── AlignedAllocator    aligned allocator (used when Align > 0)
+├── ThreadPool          process-wide shared thread pool (Meyers singleton, lazy)
+│     └─ shared by all CsvReader instances: N instances = 1 pool
+├── NumericTraits<T>    strategy: pow10 table / exponent limit / NaN / Inf
+├── parse_number<T>     unified parse templates (full: scientific notation; fast: no exponent)
+└── CsvReader<T, Align> unified reader: chunk → parallel parse → assemble
 ```
-- **线程模型**：`parallel=true` 把文件按行切成 `threads` 片提交共享池；
-  `parallel=false` 在调用线程内联解析，完全不创建线程
-- **线程安全**：不同实例可并发 `read()`/`stream()`（共享池并发安全）；
-  同一实例勿并发调用；**stream 回调内勿再发起并行读取**（共享池内会死锁）
-- **内存复用**：列数 / 行数估算 / 分片区间 / chunk 缓冲跨多次调用缓存
 
-### 扩展新数值类型
+- **Thread model**: with `parallel=true` the file is split into `threads` line-aligned
+  chunks submitted to the shared pool; with `parallel=false` parsing runs inline on the
+  calling thread and no threads are created at all
+- **Thread safety**: distinct instances may call `read()` / `stream()` concurrently
+  (the shared pool is concurrency-safe); do not call the same instance concurrently;
+  **do not start a parallel read inside a `stream()` callback** (it would deadlock
+  the shared pool)
+- **Memory reuse**: column count / row-count estimate / chunk ranges / chunk buffers are
+  cached across calls
 
-新增 `long double` 等类型只需提供一份 `NumericTraits` 特化 + 直接使用 `CsvReader<long double>`：
+### Adding a new numeric type
+
+Provide one `NumericTraits` specialization and then use `CsvReader<long double>` directly:
 
 ```cpp
 template <> struct NumericTraits<long double> {
     using type = long double;
-    static constexpr size_t pow10_max = 4932;   // long double 指数上限（按平台）
+    static constexpr size_t pow10_max = 4932;   // platform-dependent exponent limit
     static constexpr std::array<long double, pow10_max + 1> pow10_table = {...};
     static long double quiet_nan() noexcept { return std::numeric_limits<long double>::quiet_NaN(); }
     static long double infinity() noexcept { return std::numeric_limits<long double>::infinity(); }
 };
 ```
-
----
