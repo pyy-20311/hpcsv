@@ -1,5 +1,6 @@
 # hpcsv
-## 适用于快速读取大规模csv数据，例如雷达信号处理算法测试等场景
+## 适用于快速读取大规模csv数据(GB级)，例如雷达信号处理算法测试等场景 
+## Suitable for fast reading of large‑scale GB‑level CSV data, such as test scenarios for radar signal processing algorithms.
 > 高性能数值 CSV 读取器（单头文件 `csv_reader.hpp`）· 零依赖 · C++17
 > High-performance numeric CSV reader for float/double data — header-only, zero dependency.
 `hpcsv` 是一个面向**数值型 CSV**（如 `double,double,double...`）的跨平台读取器：
